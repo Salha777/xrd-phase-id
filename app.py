@@ -1,0 +1,190 @@
+"""XRD Phase-ID -- Streamlit GUI for NNLS phase fitting of powder XRD patterns.
+
+Run with:  streamlit run app.py
+"""
+import os
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+from xrd_phase_id.fit import DEFAULT_SG_ORDER, DEFAULT_SG_WINDOW, fit_sample
+from xrd_phase_id.io_utils import load_reference_csv, load_xy, name_from_upload
+from xrd_phase_id.plotting import fit_figure
+from xrd_phase_id.sanity import check_sample, suggest_phases
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEMO_DIR = os.path.join(HERE, "demo_data")
+
+st.set_page_config(page_title="XRD Phase-ID", layout="wide")
+
+VERDICT_STYLE = {
+    "ok": "success",
+    "minor_unmatched": "warning",
+    "missing_phase": "error",
+    "weak": "error",
+    "no_peaks": "error",
+}
+
+
+def _load_many(uploaded_files, loader):
+    out = {}
+    for f in uploaded_files or []:
+        try:
+            out[name_from_upload(f)] = loader(f)
+        except Exception as e:
+            st.warning(f"couldn't read {getattr(f, 'name', f)}: {e}")
+    return out
+
+
+def _demo_references():
+    refs = {}
+    ref_dir = os.path.join(DEMO_DIR, "references")
+    for fname in sorted(os.listdir(ref_dir)):
+        if fname.endswith(".csv"):
+            refs[fname[:-4]] = load_reference_csv(os.path.join(ref_dir, fname))
+    return refs
+
+
+def _demo_sample():
+    path = os.path.join(DEMO_DIR, "sample_pattern_demo.xy")
+    return {"sample_pattern_demo": load_xy(path)}
+
+
+st.title("XRD Phase-ID")
+st.caption(
+    "Fits a powder XRD pattern as a non-negative least-squares mixture of reference "
+    "patterns, in Savitzky-Golay derivative space (robust to background and intensity "
+    "scaling). This is a screening tool, not quantitative phase analysis -- read the "
+    "caveats at the bottom before quoting a number."
+)
+
+with st.sidebar:
+    st.header("1. Data")
+    use_demo = st.checkbox("Use bundled synthetic demo data", value=False,
+                            help="A ~70/30 calcite/quartz synthetic mixture, for trying "
+                                 "the tool out. Not real measured data.")
+
+    st.subheader("Reference patterns (used in the fit)")
+    ref_files = st.file_uploader(
+        "2theta,intensity CSV files -- one phase per file", type=["csv"],
+        accept_multiple_files=True, key="refs",
+    )
+
+    with st.expander("Candidate patterns (optional -- suggestions only, not fit)"):
+        st.caption(
+            "Patterns here are never added to the fit. If a sample has peaks none of "
+            "your fit references explain, these are searched to suggest what might be "
+            "missing."
+        )
+        candidate_files = st.file_uploader(
+            "2theta,intensity CSV files", type=["csv"],
+            accept_multiple_files=True, key="candidates",
+        )
+
+    st.subheader("Sample pattern(s)")
+    sample_files = st.file_uploader(
+        "2theta intensity, whitespace-separated (.xy / .txt / .dat)",
+        type=["xy", "txt", "dat", "csv"], accept_multiple_files=True, key="samples",
+    )
+
+    st.header("2. Advanced settings")
+    sg_window = st.number_input("Savitzky-Golay window", min_value=5, value=DEFAULT_SG_WINDOW,
+                                step=2, help="Must be odd; auto-shrunk for short patterns.")
+    sg_order = st.number_input("Savitzky-Golay polynomial order", min_value=1,
+                               value=DEFAULT_SG_ORDER, step=1)
+    xlim_max = st.number_input("Plot upper 2theta limit", min_value=10, value=60)
+
+    run = st.button("Run fit", type="primary")
+
+references = _demo_references() if use_demo else _load_many(ref_files, load_reference_csv)
+candidates = _load_many(candidate_files, load_reference_csv) if not use_demo else {}
+samples = _demo_sample() if use_demo else _load_many(sample_files, load_xy)
+
+if not run:
+    st.info("Load references and at least one sample in the sidebar, then click **Run fit**.")
+elif not references:
+    st.error("No reference patterns loaded.")
+elif not samples:
+    st.error("No sample patterns loaded.")
+else:
+    st.write(f"**{len(references)} reference(s):** {', '.join(references)}")
+    if candidates:
+        st.write(f"**{len(candidates)} candidate pattern(s) for suggestions:** {', '.join(candidates)}")
+
+    summary_rows = []
+    for sample_name, (angles, intensities) in samples.items():
+        st.divider()
+        st.subheader(sample_name)
+
+        try:
+            result = fit_sample(angles, intensities, references, sg_window, sg_order)
+        except Exception as e:
+            st.error(f"fit failed: {e}")
+            continue
+        for w in result.warnings:
+            st.warning(w)
+
+        sanity = check_sample(angles, intensities, references)
+        style = VERDICT_STYLE.get(sanity.verdict, "info")
+        getattr(st, style)(sanity.message)
+
+        if sanity.unmatched and candidates:
+            hints = suggest_phases(sanity.unmatched, sanity.peaks, candidates)
+            for score, name, explains, present in hints:
+                st.info(f"-> try **{name}**: explains {explains:.0%} of the unmatched "
+                       f"intensity, {present:.0%} of its own strongest lines are present "
+                       f"in this sample")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig = fit_figure(sample_name, result, xlim=(angles[0], min(angles[-1], xlim_max)))
+            st.pyplot(fig, clear_figure=True)
+        with col2:
+            df = pd.DataFrame({
+                "reference": list(result.weights.keys()),
+                "weight": [round(w, 4) for w in result.weights.values()],
+            }).sort_values("weight", ascending=False)
+            st.dataframe(df, hide_index=True, use_container_width=True)
+            st.metric("Residual RMS", f"{result.residual_rms:.4g}")
+            st.caption(
+                "Weights are NNLS fit coefficients in derivative space, normalised to "
+                "sum to 1. They are **not** quantitative phase fractions -- treat them "
+                "as \"mostly consistent with\", never \"X% phase Y\". Residual RMS is on "
+                "area-normalised intensities, which are small to start with, so a small "
+                "residual is not on its own reassurance -- trust the sanity check above it."
+            )
+
+        row = {"sample": sample_name, **{k: round(v, 4) for k, v in result.weights.items()},
+               "residual_rms": result.residual_rms, "sanity_verdict": sanity.verdict}
+        summary_rows.append(row)
+
+    if summary_rows:
+        st.divider()
+        st.subheader("Summary")
+        summary_df = pd.DataFrame(summary_rows)
+        st.dataframe(summary_df, hide_index=True, use_container_width=True)
+        st.download_button("Download summary CSV", summary_df.to_csv(index=False),
+                          file_name="xrd_phase_id_summary.csv", mime="text/csv")
+
+st.divider()
+with st.expander("Method and caveats -- read before quoting a number"):
+    st.markdown(
+        """
+- **What the fit does.** Each pattern is area-normalised, then transformed with a
+  Savitzky-Golay first derivative. Fitting in derivative space is what makes it robust to
+  background slope and to arbitrary intensity scaling; the sample's derivative is then
+  fit as a non-negative least-squares (NNLS) mixture of the reference derivatives.
+- **NNLS always returns an answer.** It cannot say "none of these references match". If the
+  real phase is missing from your reference set, the weight goes to whichever reference
+  correlates best, and you get a confident-looking number for a phase that isn't in the
+  sample. **Always read the sanity check before trusting the weights** -- it is computed
+  independently of the fit, from raw peak positions only.
+- **Weights are not phase fractions.** They are fit coefficients, normalised to sum to 1.
+  Say "mostly consistent with", not "X% phase Y". Quantitative phase analysis needs
+  Rietveld refinement with a preferred-orientation correction -- platy/layered phases in
+  particular redistribute intensity in ways a fixed-intensity template match will get wrong.
+- **Residual RMS is not a trust signal.** Area-normalised intensities are small to begin
+  with, so small residuals are not reassuring on their own.
+"""
+    )
