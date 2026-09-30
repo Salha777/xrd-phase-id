@@ -29,9 +29,11 @@ This opens the app in your browser (usually `http://localhost:8501`).
 
 1. In the sidebar, upload **reference patterns** — one CSV per phase, each two
    columns `2theta,intensity`.
-2. Upload one or more **sample patterns** — whitespace-separated
-   `2theta intensity`, one point per line (the standard `.xy` export format
-   from most XRD software).
+2. Upload one or more **sample patterns**, either:
+   - raw `.xrdml` files (PANalytical XML export) — the scan and sample name
+     are read straight out of the file, no conversion step needed, or
+   - whitespace-separated `2theta intensity` text, one point per line (the
+     `.xy` convention most XRD software can also export).
 3. Optionally upload **candidate patterns**: phases you suspect might be
    present but don't want in the fit. These are never fit — they're only
    searched for suggestions when the sample has unexplained peaks.
@@ -88,7 +90,7 @@ anything you download from it).
 ```
 app.py                          Streamlit GUI
 xrd_phase_id/
-  io_utils.py                   reading .xy samples and reference CSVs
+  io_utils.py                   reading .xrdml / .xy samples and reference CSVs
   fit.py                        area normalisation, S-G derivative, NNLS fit
   sanity.py                     peak finding + independent sanity check
   plotting.py                   the 4-panel fit figure

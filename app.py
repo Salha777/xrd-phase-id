@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from xrd_phase_id.fit import DEFAULT_SG_ORDER, DEFAULT_SG_WINDOW, fit_sample
-from xrd_phase_id.io_utils import load_reference_csv, load_xy, name_from_upload
+from xrd_phase_id.io_utils import load_reference_csv, load_xrdml, load_xy, name_from_upload
 from xrd_phase_id.plotting import fit_figure
 from xrd_phase_id.sanity import check_sample, suggest_phases
 
@@ -34,6 +34,29 @@ def _load_many(uploaded_files, loader):
             out[name_from_upload(f)] = loader(f)
         except Exception as e:
             st.warning(f"couldn't read {getattr(f, 'name', f)}: {e}")
+    return out
+
+
+def _load_samples(uploaded_files):
+    """Like _load_many, but dispatches .xrdml through load_xrdml and uses the
+    sample name it carries (falling back to the filename) instead of the
+    filename alone."""
+    out = {}
+    for f in uploaded_files or []:
+        fname = getattr(f, "name", str(f))
+        try:
+            if fname.lower().endswith(".xrdml"):
+                angles, intensities, xrdml_name = load_xrdml(f)
+                label = xrdml_name or name_from_upload(f)
+            else:
+                angles, intensities = load_xy(f)
+                label = name_from_upload(f)
+        except Exception as e:
+            st.warning(f"couldn't read {fname}: {e}")
+            continue
+        if label in out:  # two files resolved to the same sample name
+            label = f"{label} ({fname})"
+        out[label] = (angles, intensities)
     return out
 
 
@@ -84,8 +107,10 @@ with st.sidebar:
 
     st.subheader("Sample pattern(s)")
     sample_files = st.file_uploader(
-        "2theta intensity, whitespace-separated (.xy / .txt / .dat)",
-        type=["xy", "txt", "dat", "csv"], accept_multiple_files=True, key="samples",
+        "raw .xrdml, or 2theta intensity whitespace-separated (.xy / .txt / .dat)",
+        type=["xrdml", "xy", "txt", "dat", "csv"], accept_multiple_files=True, key="samples",
+        help="A .xrdml is read directly -- its sample name is used as the label "
+             "automatically, no conversion to .xy needed.",
     )
 
     st.header("2. Advanced settings")
@@ -99,7 +124,7 @@ with st.sidebar:
 
 references = _demo_references() if use_demo else _load_many(ref_files, load_reference_csv)
 candidates = _load_many(candidate_files, load_reference_csv) if not use_demo else {}
-samples = _demo_sample() if use_demo else _load_many(sample_files, load_xy)
+samples = _demo_sample() if use_demo else _load_samples(sample_files)
 
 if not run:
     st.info("Load references and at least one sample in the sidebar, then click **Run fit**.")
