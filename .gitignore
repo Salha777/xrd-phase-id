@@ -5,3 +5,6 @@ venv/
 .streamlit/
 *.egg-info/
 .DS_Store
+
+# mixed-provenance reference patterns (RRUFF / CIF-simulated): not for public push
+reference_library/local/

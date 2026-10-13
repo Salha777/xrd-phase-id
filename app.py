@@ -74,6 +74,37 @@ def _demo_sample():
     return {"sample_pattern_demo": load_xy(path)}
 
 
+LIB_DIR = os.path.join(HERE, "reference_library")
+PATTERN_EXTS = (".csv", ".xy", ".txt", ".dat")
+
+
+@st.cache_data(show_spinner=False)
+def _library_index():
+    """{group label: {pattern name: path}} for every pattern under reference_library/
+    plus the synthetic demo references."""
+    groups = {}
+    for root, _, files in os.walk(LIB_DIR):
+        found = {os.path.splitext(f)[0]: os.path.join(root, f)
+                 for f in sorted(files) if f.lower().endswith(PATTERN_EXTS)}
+        if found:
+            rel = os.path.relpath(root, LIB_DIR)
+            groups[rel.replace("local" + os.sep, "").replace(os.sep, " / ")] = found
+    demo = os.path.join(DEMO_DIR, "references")
+    groups["demo (synthetic)"] = {f[:-4]: os.path.join(demo, f)
+                                   for f in sorted(os.listdir(demo)) if f.endswith(".csv")}
+    return groups
+
+
+@st.cache_data(show_spinner=False)
+def _load_library_pattern(path):
+    return load_reference_csv(path)
+
+
+def _set_group(group, value):
+    for name in _library_index()[group]:
+        st.session_state[f"lib::{group}::{name}"] = value
+
+
 st.title("XRD Phase-ID")
 st.caption(
     "Fits a powder XRD pattern as a non-negative least-squares mixture of reference "
@@ -89,10 +120,24 @@ with st.sidebar:
                                  "the tool out. Not real measured data.")
 
     st.subheader("Reference patterns (used in the fit)")
+    library = _library_index()
+    with st.expander("Reference library -- tick to include", expanded=True):
+        for group, patterns in library.items():
+            st.markdown(f"**{group}**")
+            c1, c2 = st.columns(2)
+            c1.button("all", key=f"all::{group}", on_click=_set_group, args=(group, True))
+            c2.button("none", key=f"none::{group}", on_click=_set_group, args=(group, False))
+            for name in patterns:
+                st.checkbox(name, key=f"lib::{group}::{name}")
     ref_files = st.file_uploader(
-        "2theta,intensity CSV files -- one phase per file", type=["csv"],
-        accept_multiple_files=True, key="refs",
+        "...or upload your own (2theta,intensity; .csv / .xy / .txt / .dat)",
+        type=["csv", "xy", "txt", "dat"], accept_multiple_files=True, key="refs",
     )
+    suggest_from_library = st.checkbox(
+        "Search unticked library patterns for suggestions", value=True,
+        help="If a sample has strong peaks none of the ticked references explain, the "
+             "unticked library patterns are searched to suggest what might be missing. "
+             "They are never added to the fit.")
 
     with st.expander("Candidate patterns (optional -- suggestions only, not fit)"):
         st.caption(
@@ -101,13 +146,13 @@ with st.sidebar:
             "missing."
         )
         candidate_files = st.file_uploader(
-            "2theta,intensity CSV files", type=["csv"],
+            "2theta,intensity files", type=["csv", "xy", "txt", "dat"],
             accept_multiple_files=True, key="candidates",
         )
 
     st.subheader("Sample pattern(s)")
     sample_files = st.file_uploader(
-        "raw .xrdml, or 2theta intensity whitespace-separated (.xy / .txt / .dat)",
+        "raw .xrdml, or two-column 2theta/intensity (.csv / .xy / .txt / .dat)",
         type=["xrdml", "xy", "txt", "dat", "csv"], accept_multiple_files=True, key="samples",
         help="A .xrdml is read directly -- its sample name is used as the label "
              "automatically, no conversion to .xy needed.",
@@ -122,20 +167,32 @@ with st.sidebar:
 
     run = st.button("Run fit", type="primary")
 
-references = _demo_references() if use_demo else _load_many(ref_files, load_reference_csv)
-candidates = _load_many(candidate_files, load_reference_csv) if not use_demo else {}
+ticked = {name: _load_library_pattern(path)
+          for group, patterns in library.items() for name, path in patterns.items()
+          if st.session_state.get(f"lib::{group}::{name}")}
+ticked.update(_load_many(ref_files, load_reference_csv))
+references = ticked
+if use_demo and not references:
+    references = _demo_references()
+    st.sidebar.info("No references ticked -- using the demo references.")
+candidates = _load_many(candidate_files, load_reference_csv)
+if suggest_from_library:
+    for group, patterns in library.items():
+        for name, path in patterns.items():
+            if name not in references and name not in candidates:
+                candidates[name] = _load_library_pattern(path)
 samples = _demo_sample() if use_demo else _load_samples(sample_files)
 
 if not run:
     st.info("Load references and at least one sample in the sidebar, then click **Run fit**.")
 elif not references:
-    st.error("No reference patterns loaded.")
+    st.error("No reference patterns selected -- tick some in the library or upload your own.")
 elif not samples:
     st.error("No sample patterns loaded.")
 else:
     st.write(f"**{len(references)} reference(s):** {', '.join(references)}")
     if candidates:
-        st.write(f"**{len(candidates)} candidate pattern(s) for suggestions:** {', '.join(candidates)}")
+        st.caption(f"{len(candidates)} unticked/candidate pattern(s) searched for suggestions.")
 
     summary_rows = []
     for sample_name, (angles, intensities) in samples.items():

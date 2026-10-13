@@ -27,8 +27,10 @@ This opens the app in your browser (usually `http://localhost:8501`).
 
 ## Using it
 
-1. In the sidebar, upload **reference patterns** — one CSV per phase, each two
-   columns `2theta,intensity`.
+1. In the sidebar, tick **reference patterns** from the built-in library (every pattern under
+   `reference_library/` appears as a tick box; drop your own files in there), and/or upload
+   your own — one file per phase, two columns `2theta,intensity` (`.csv`, `.xy`, `.txt` or `.dat`;
+   comma, tab, semicolon or space separated).
 2. Upload one or more **sample patterns**, either:
    - raw `.xrdml` files (PANalytical XML export) — the scan and sample name
      are read straight out of the file, no conversion step needed, or

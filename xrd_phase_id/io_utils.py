@@ -1,10 +1,10 @@
 """Reading two-column XRD data from files or uploaded byte streams.
 
-Three shapes are accepted throughout this package:
-  - "sample" files: whitespace-separated ``2theta  intensity`` (.xy convention),
-    one point per line. Non-numeric lines are skipped rather than raising, since
-    instrument-exported .xy files sometimes carry a stray header line.
-  - "reference" files: comma-separated ``2theta,intensity``.
+Two shapes are accepted throughout this package:
+  - "sample" and "reference" files: two columns, ``2theta intensity``, separated
+    by whitespace, tabs, commas or semicolons (so .xy / .txt / .dat / .csv all
+    work). Non-numeric lines are skipped rather than raising, since exports
+    often carry a header line.
   - ``.xrdml`` files (PANalytical XML export): the 2theta scan, intensities and
     sample name are read directly out of the XML, so no separate .xy
     conversion step is needed.
@@ -13,6 +13,7 @@ All readers accept a path, an open binary/text file, or anything with a
 ``.read()`` method (Streamlit's UploadedFile satisfies this), so the same code
 serves the CLI and the GUI.
 """
+import re
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -29,16 +30,16 @@ def _decode_lines(source):
 
 
 def load_xy(source):
-    """Parse whitespace-separated ``2theta intensity`` pairs.
+    """Parse a two-column ``2theta intensity`` pattern in any common text layout.
 
+    Columns may be separated by spaces, tabs, commas or semicolons (so .xy,
+    .txt, .dat and .csv all work). Header, comment and blank lines are skipped,
+    and any columns beyond the first two (e.g. an error column) are ignored.
     Returns (angles, intensities) as float arrays, sorted by angle.
     """
     angles, intensities = [], []
     for line in _decode_lines(source):
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.replace(",", " ").split()
+        parts = re.sub(r"[,;	]", " ", line.replace("﻿", "")).split()
         if len(parts) < 2:
             continue
         try:
@@ -52,23 +53,7 @@ def load_xy(source):
     return np.asarray(angles, float)[order], np.asarray(intensities, float)[order]
 
 
-def load_reference_csv(source):
-    """Parse a comma-separated ``2theta,intensity`` reference pattern."""
-    lines = [ln for ln in _decode_lines(source) if ln.strip()]
-    rows = []
-    for ln in lines:
-        parts = [p.strip() for p in ln.split(",")]
-        if len(parts) < 2:
-            continue
-        try:
-            rows.append((float(parts[0]), float(parts[1])))
-        except ValueError:
-            continue  # tolerate a header row
-    if not rows:
-        raise ValueError("no numeric (2theta,intensity) rows found")
-    rows.sort(key=lambda t: t[0])
-    arr = np.asarray(rows, float)
-    return arr[:, 0], arr[:, 1]
+load_reference_csv = load_xy
 
 
 def load_xrdml(source):

@@ -52,3 +52,16 @@ def test_load_xrdml_without_scan_raises():
     bad = "<xrdMeasurements><sample><id>x</id></sample></xrdMeasurements>"
     with pytest.raises(ValueError):
         load_xrdml(io.StringIO(bad))
+
+
+@pytest.mark.parametrize("text", [
+    "10.0;5\n10.1;6\n",
+    "2theta\tcounts\n10.0\t5\n10.1\t6\n",
+    "﻿angles,intensities\n10.0,5\n10.1,6\n",
+    "x,y,err\n10.0,5,0.1\n10.1,6,0.1\n",
+])
+def test_pattern_reader_accepts_common_delimiters(text):
+    for loader in (load_xy, load_reference_csv):
+        angles, intensities = loader(io.StringIO(text))
+        assert list(angles) == [10.0, 10.1]
+        assert list(intensities) == [5.0, 6.0]
