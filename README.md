@@ -27,7 +27,9 @@ This opens the app in your browser (usually `http://localhost:8501`).
 
 ## Using it
 
-1. In the sidebar, tick **reference patterns** from the built-in library (every pattern under
+1. In the sidebar, tick **reference patterns** from the built-in library (11 common minerals ship
+   in `reference_library/minerals/`, simulated and CC0; add more from COD CIFs with
+   `scripts/simulate_references.py --cif`; every pattern under
    `reference_library/` appears as a tick box; drop your own files in there), and/or upload
    your own — one file per phase, two columns `2theta,intensity` (`.csv`, `.xy`, `.txt` or `.dat`;
    comma, tab, semicolon or space separated).
