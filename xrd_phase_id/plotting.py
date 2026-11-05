@@ -21,7 +21,10 @@ def display_curves(result):
     a = result.angles
     step = float(np.median(np.diff(a)))
     window = max(11, int(round(3.0 / step)) | 1)
-    net = np.clip(result.sample_norm - _rolling_background(result.sample_norm, window), 0, None)
+    net = result.sample_norm - _rolling_background(result.sample_norm, window)
+    # the 10th-percentile background sits slightly under the noise; most points are background,
+    # so the median of what's left is that offset. Remove it so noise is centred on zero.
+    net = net - np.median(net)
     sample = area_normalise(net)
     r = result.reconstruction
     # scale the reconstruction onto the sample by least squares: area-normalising both would let
