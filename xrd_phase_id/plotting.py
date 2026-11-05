@@ -15,19 +15,40 @@ def display_curves(result):
     The fit works in derivative space, where a smooth background drops out, but the sample is
     area-normalised *with* its background. The references have none, so on real data the raw
     sample_norm looks far too small next to the reconstruction. For display, remove a rolling
-    10th-percentile background (the same estimate the sanity check uses) and put both curves
-    on the same area scale. The fit, the weights and residual_rms are unchanged.
+    10th-percentile background (the same estimate the sanity check uses) and scale the
+    reconstruction onto it by least squares. The fit, the weights and residual_rms are unchanged.
     """
     a = result.angles
     step = float(np.median(np.diff(a)))
     window = max(11, int(round(3.0 / step)) | 1)
     net = np.clip(result.sample_norm - _rolling_background(result.sample_norm, window), 0, None)
     sample = area_normalise(net)
-    recon = area_normalise(result.reconstruction) if np.any(result.reconstruction) else result.reconstruction
+    r = result.reconstruction
+    # scale the reconstruction onto the sample by least squares: area-normalising both would let
+    # the leftover noise floor in the sample shrink its peaks relative to the reconstruction
+    k = float(np.dot(r, sample) / np.dot(r, r)) if np.any(r) else 0.0
+    recon = k * r
     return sample, recon, sample - recon
 
 
-def fit_figure(sample_name, result, xlim=None):
+DARK_BG = "#0e1117"   # Streamlit's dark-theme background, so the figure blends in
+DARK_RC = {
+    "figure.facecolor": DARK_BG, "axes.facecolor": DARK_BG, "savefig.facecolor": DARK_BG,
+    "axes.edgecolor": "#8b949e", "axes.labelcolor": "#e6edf3", "text.color": "#e6edf3",
+    "xtick.color": "#c9d1d9", "ytick.color": "#c9d1d9", "grid.color": "#30363d",
+    "legend.facecolor": "#161b22", "legend.edgecolor": "#30363d",
+}
+
+
+def fit_figure(sample_name, result, xlim=None, dark=False):
+    """Four-panel figure. dark=True draws it for a dark background (e.g. Streamlit's dark theme)."""
+    if dark:
+        with plt.rc_context(DARK_RC):
+            return _fit_figure(sample_name, result, xlim, ink="#f0f6fc")
+    return _fit_figure(sample_name, result, xlim, ink="black")
+
+
+def _fit_figure(sample_name, result, xlim, ink):
     angles = result.angles
     sample_d, recon_d, resid_d = display_curves(result)
     xlim = xlim or (angles[0], min(angles[-1], 60))
@@ -49,7 +70,7 @@ def fit_figure(sample_name, result, xlim=None):
         ax1.plot(angles, result.reference_interp[name] + offset, linestyle="--",
                  linewidth=1, label=label)
         offset += OFFSET_STEP
-    ax1.plot(angles, sample_d + offset, linewidth=1.6, color="black",
+    ax1.plot(angles, sample_d + offset, linewidth=1.6, color=ink,
              label=sample_name)
     offset += OFFSET_STEP
     ax1.plot(angles, recon_d + offset, linewidth=1.6, color="tab:red",
@@ -60,7 +81,7 @@ def fit_figure(sample_name, result, xlim=None):
     ax1.set_xlim(*xlim)
     plt.setp(ax1.get_xticklabels(), visible=False)
 
-    ax2.plot(angles, sample_d, linewidth=1.6, color="black", label=f"{sample_name} (background removed)")
+    ax2.plot(angles, sample_d, linewidth=1.6, color=ink, label=f"{sample_name} (background removed)")
     ax2.plot(angles, recon_d, linewidth=1.4, color="tab:red", linestyle="-.",
              label="reconstruction")
     ax2.set_ylabel("area-norm. intensity")
@@ -89,7 +110,7 @@ def fit_figure(sample_name, result, xlim=None):
 
     weights = np.array([result.weights[n] for n in names])
     colors = plt.cm.tab10(np.linspace(0, 1, max(len(names), 1)))
-    bars = ax4.bar(names, weights, color=colors, edgecolor="black", linewidth=0.6)
+    bars = ax4.bar(names, weights, color=colors, edgecolor=ink, linewidth=0.6)
     ax4.set_ylabel("fractional NNLS weight")
     ax4.set_title("Phase contributions")
     ax4.set_ylim(0, max(weights.max() * 1.15 if len(weights) else 0.05, 0.05))

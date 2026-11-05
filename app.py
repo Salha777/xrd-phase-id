@@ -220,7 +220,11 @@ else:
 
         col1, col2 = st.columns([2, 1])
         with col1:
-            fig = fit_figure(sample_name, result, xlim=(angles[0], min(angles[-1], xlim_max)))
+            try:
+                dark = st.context.theme.type == "dark"
+            except Exception:
+                dark = False
+            fig = fit_figure(sample_name, result, xlim=(angles[0], min(angles[-1], xlim_max)), dark=dark)
             st.pyplot(fig, clear_figure=True)
         with col2:
             df = pd.DataFrame({
